@@ -7,7 +7,6 @@ from cleaner.dataCleaner import DataCleaner
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Process data folder and clean it up')
-    # parser.add_argument("-?", "--help", action="help", help="show this help message and exit")
     parser.add_argument('-d', '--data', help='Path to data', required=True, default='/data')
     parser.add_argument('-c', '--config', help='Path to config file', required=True, default='/config/config.json')
     parser.add_argument('-q', '--quick',
