@@ -1,4 +1,6 @@
 import argparse
+import sys
+from distutils import util
 from datetime import datetime
 
 from cleaner.dataCleaner import DataCleaner
@@ -17,9 +19,25 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     if args.time:
-        current_time = datetime.fromtimestamp(int(args.time))
+        try:
+            current_time = datetime.fromtimestamp(int(args.time))
+        except ValueError:
+            print(f'Please provide valid timestamp value. Provided: {args.time}')
+            sys.exit(1)
     else:
-        current_time = None
+        current_time = datetime.now()
 
-    data_cleaner = DataCleaner(args.data, args.config, args.quick, current_time)
+    quick = False
+    if args.quick:
+        try:
+            quick = bool(util.strtobool(args.quick))
+        except ValueError:
+            print(f'Please provide valid quick param value. Provided: {args.quick}')
+            sys.exit(1)
+
+    print(
+        f'Params used for processing. Data folder {args.data}, config file {args.config}, quick mode {str(quick)},'
+        f' time for evaluation {current_time}')
+
+    data_cleaner = DataCleaner(args.data, args.config, quick, current_time)
     data_cleaner.process_data_dir()
