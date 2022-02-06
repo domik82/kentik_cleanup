@@ -44,7 +44,7 @@ Defining what to delete: periodic scanning vs eventing
     200 devices * 50 files * 60 min * 24h * 90 days = 1 296 000 000 files
     Or
     ~26 000 000 directories - I don't think it's worth keeping all that data it in memory.
-    Periodic scanning od data folders should be sufficient.
+    Periodic scanning of data folders should be sufficient.
 
 Idea for deletes:
 Folder structure scanning and "blind hit" every minute.
@@ -81,8 +81,9 @@ IDEA:
 All that  gave me thought that executing full script should be simply done as frequently as possible.
 
 How fast should it be?
-   Because of GIL Python is single threaded so it will consume max 1 core.
+   Because of Python GIL solution will consume max 1 core.
    It could have threads per folder/device but at this moment I don't feel it's needed.
+   Probably it will get limited by I/O anyway.
 
    Search Optimization can be made based on dates.
    There is no need to even enter below certain dir tree if the year/month doesn't match
@@ -91,10 +92,11 @@ How fast should it be?
 ### Final approach ####
 Based on the numbers I would suggest to run it in cron every minute.
 This should delete 10k files what should be safe for I/O.
-With fast mode it will delete entire folder like every hour or every day - it's designed to  work a bit better there
+
+With fast mode it will delete entire folder like every hour or every day - it's designed to work a bit better there
 I expect very minor perf improvement comparing those two.
 
-Script deletes data with exactly 24h difference if retention is set up to 1d.
+Script deletes data with 24h difference if retention is set up to 1d.
 This means that script executed with 1day retention on 02.01.2022 12:00 should delete any data till 01.02.2022 11:59
 
 For each dir tree I will be generating comparable dates per folder and then decide if I need to go
@@ -160,10 +162,10 @@ Usage:
 # build image
 docker build -t cleaner .
 
-# run docker with mounted disks
+# by default run docker with any mounted disks
 docker run -l cleaner -v Z:\devel\Kentik\resources\data_small:/mnt/data -v Z:\devel\Kentik\resources\config:/mnt/config cleaner -d /mnt/data -c /mnt/config/config.json
 
 OR run with quick mode and timestamp
 
-docker run -l cleaner -v c:\data:/mnt/data -v Z:\config:/mnt/config cleaner -d /mnt/data -c /mnt/config/config.json -q True -t 1640775600
+docker run -l cleaner -v c:\data:/mnt/data cleaner -d /mnt/data -c /mnt/data/config.json -q true -t 1640775600
 
