@@ -16,12 +16,6 @@ class ConfigGenerator:
         config['retention'] = retention
         return config
 
-    # @staticmethod
-    # def read_configuration(config_file_path):
-    #     with open(config_file_path, 'r') as config_file:
-    #         config_data = json.load(config_file)
-    #         return config_data
-
     @staticmethod
     def write_configuration(config_file_path, configuration_dict):
         # Serializing json
