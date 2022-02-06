@@ -1,0 +1,19 @@
+# build image
+docker build -t cleaner .
+
+# run docker with mounted disks and your own data
+docker run -l cleaner -v Z:\resources\data_small:/mnt/data -v Z:\resources\config:/mnt/config cleaner -d /mnt/data -c /mnt/config/config_small.json
+
+or with fast delete and timestamp
+
+docker run -l cleaner -v z:\devel\Kentik\manual_test\3_devices_with_5_devices_and_files:/mnt/data cleaner -d /mnt/data -c /mnt/data/config_generated.json -q True -t 1641211320
+
+# Debugging
+
+# overwrite entrypoint and log to check behaviour
+docker run -it --entrypoint sh cleaner
+
+# rewrite run image to new one and then inspect it by sh
+docker commit old_image inspect_image
+docker run -ti --entrypoint=sh inspect_image
+

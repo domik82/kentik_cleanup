@@ -1,0 +1,169 @@
+Assumptions and thinking process.
+
+Requirements:
+    By the sound of the document provided requirements are:
+    - Every minute will have +50 files ("Assume each directory has ~50 data files inside it.")
+    - Each server contain 200 devices.
+    - File size was not specified.
+
+    First two requirements gives 50*200=10000 files per min Or 600 000 per hour
+
+    Now according to small research I did there might be kernel problems while
+    deleting/marking to delete large amounts of files at once -> source:
+    https://stackoverflow.com/questions/16722112/why-does-my-script-periodically-freeze-while-deleting-millions-of-files
+
+    In this stackoverflow sample - problems showed up past 28k files deleted at once.
+    Probably we should avoid something like that so best would be to scan data minute by minute.
+
+    Deleting data post any outage or downtime can cause problems and should be throttled or it should be assumed
+    that server is in some maintenance mode as it definitely can cause trouble.
+
+    10k files even 1MB each would be 10GB data per minute.
+    600 000 * 1MB = 600 GB per hour
+    600 000 * 1MB *24h *120d = 1.73 PetaBytes
+
+    I guess this would have to be run on some type of network storage and I don't feel I'm able to test such config.
+    For such setup disk scheduler and network "stack" performance will have impact.
+
+Folder Naming:
+    - there is no requirement for company/device ids. I guess - almost any string should work in such case.
+    - there is option that data with pattern like _backup / _old etc will be there
+        - it is not guaranteed it won't get deleted
+        - the only way to be safe that folder will not be deleted is to mark it as read only along with all files inside
+    - there is nothing that will distinguish '9252021' from '9252021_bkp' - for now this is still valid company
+    - there is set of chars that shouldn't be allowed from OS perspective - it's not covered by this code
+        https://stackoverflow.com/questions/1976007/what-characters-are-forbidden-in-windows-and-linux-directory-names
+
+Approach:
+
+Defining what to delete: periodic scanning vs eventing
+    I was thinking how to approach overall maintenance of structure.
+    After initial scan I could listen for every dir creation event / filter out dataset dir and then react
+    but I'm not sure it's worth the effort not to mention that there might be scenario where files would need to be
+    kept for longer
+    200 devices * 50 files * 60 min * 24h * 90 days = 1 296 000 000 files
+    Or
+    ~26 000 000 directories - I don't think it's worth keeping all that data it in memory.
+    Periodic scanning od data folders should be sufficient.
+
+Idea for deletes:
+Folder structure scanning and "blind hit" every minute.
+
+IDEA:
+1. Read the config with desired retention.
+2. Read first data layer with company_ID/device_ID - calculate retention per dir
+3. Calculate last date to keep the data => last_sample_date =  current - delta
+4. On First launch
+    a. scan all the dirs based on year, month, date, hour, minute
+        - mark for delete everything not matching last date
+        - mark all the empty dirs for deletion
+    b. we could acquire paths to all the above files post first start for deletion
+       and then delete the files with throttling applied. Here probably folder size would be better.
+
+5. Once all OLD data is gone we could continue to run the script and try to apply "blind hit" approach
+    a. On every minute generate folders that should be deleted -> last_sample_folder = now - delta
+    b. try to blindly delete the folder if exists
+        - that would assume that there is indeed 50 files in folder
+        - if that is not true
+            - check if "blindy generated" dir exists
+            - read the content or amount of files in dir
+            - mark files/folders for deletion
+            - delete with throttling
+    c. this didn't passed validation
+
+6. Maintenance of New Data / Empty folders
+    a. I would guess that new devices can be added randomly
+    b. I would assume that devices can be removed from the server and will stop producing data
+    Therefore:
+        - We should periodically scan if device/year/month/hour folder is empty if so -> delete
+        - We need to know to regenerate the retention per company/device
+
+All that  gave me thought that executing full script should be simply done as frequently as possible.
+
+How fast should it be?
+   Because of GIL Python is single threaded so it will consume max 1 core.
+   It could have threads per folder/device but at this moment I don't feel it's needed.
+
+   Search Optimization can be made based on dates.
+   There is no need to even enter below certain dir tree if the year/month doesn't match
+
+
+### Final approach ####
+Based on the numbers I would suggest to run it in cron every minute.
+This should delete 10k files what should be safe for I/O.
+With fast mode it will delete entire folder like every hour or every day - it's designed to  work a bit better there
+I expect very minor perf improvement comparing those two.
+
+Script deletes data with exactly 24h difference if retention is set up to 1d.
+This means that script executed with 1day retention on 02.01.2022 12:00 should delete any data till 01.02.2022 11:59
+
+For each dir tree I will be generating comparable dates per folder and then decide if I need to go
+inside. This type of scanning should be fast. If folder doesn't match "date" type - exception will be thrown
+Such folder will not be touched (see notes *1)
+
+That means that folder named 2021 will be a date of 2021.01.01 00:00.
+Any "current date" like 01.02.2022 16:45 will get converted to 2022.01.01 00:00 allowing to compare those two.
+It will happen up to data per minute.
+
+I will use os.scandir as it's faster compared to os.walk in order to read as little data as I need.
+
+
+Error handling
+- I guess we can have scenario when folder is read only. Log it - try to delete what is possible.
+
+
+*1 - there is fast and slow scanning implemented in current code. By default slower one is used.
+This mean that data is scanned and deleted minute by minute.
+
+Switching scanning to fast mode will allow to delete full hour/day/month/year of data if it doesn't match retention date.
+Now this can cause I/O issues so should be checked carefully and used for example after outage to delete larger
+amount of data.
+
+There is possibility to add like 100ms sleep between deletes so normal I/O operations wouldn't get blocked.
+It could be done after line in cleaner/dataCleaner.py:77
+
+Fast mode is using rmtree it will fail on first read only file / problematic.
+So if entire year folder should be deleted - data till read only folder will normally get removed - anything below stay.
+
+Sample structure
+All folders by date 2021.12.31 12:00 - 13:00 should be deleted
+- CompanyA_3d\A1A\2021\12\31\12\03 - has read only file
+- CompanyA_3d\A1A\2021\12\31\12\04 - will stay even if it doesn't contain the read only file
+
+There is such sample in prepared E2E tests.
+Due to nature of slow type of execution ( minute by minute processing) - this execution wouldn't hit such issue.
+To avoid such behaviour rmtree "onerror" operation is implemented but it's limited to logging failure.
+It could:
+ - remove read only flag
+ - move the folder to safe place
+ - skip like now
+
+Manual folder manipulation consequences.
+- Folder named \CompanyA_3d\A1A\2021\12\31\12\03_backup will not get deleted in minute by minute mode
+- same folder will get deleted if fast mode is used and folder marked to be deleted will be
+    for example - \CompanyA_3d\A1A\2021\12\31\  - it will not look what is inside.
+    marking folder \CompanyA_3d\A1A\2021\12\31\12\03_backup read only will save it from deletion
+
+
+Final notes:
+I don't have much experience with docker. I played with it during this exercise and did my best.
+I'm not sure how logging should be set up to be easily accessible from "docker" perspective.
+
+I have some E2E tests that generate folder structure and then cleanup is executed.
+There are some unit tests for parsing config file.
+
+I didn't had time to prepare unit tests for code pieces (raising exceptions etc).
+As notes suggests it would be best to use RAM disk or mock the disk operations somehow.
+
+
+Usage:
+# build image
+docker build -t cleaner .
+
+# run docker with mounted disks
+docker run -l cleaner -v Z:\devel\Kentik\resources\data_small:/mnt/data -v Z:\devel\Kentik\resources\config:/mnt/config cleaner -d /mnt/data -c /mnt/config/config.json
+
+OR run with quick mode and timestamp
+
+docker run -l cleaner -v c:\data:/mnt/data -v Z:\config:/mnt/config cleaner -d /mnt/data -c /mnt/config/config.json -q True -t 1640775600
+
